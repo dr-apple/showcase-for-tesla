@@ -1,0 +1,43 @@
+Package: com.dr-apple.showcase-for-tesla
+Name: Showcase for Tesla (Rootless, Netzwerktest)
+Version: 0.1~nettest1
+Architecture: iphoneos-arm64
+Section: Utilities
+Maintainer: dr-apple <dr-apple@users.noreply.github.com>
+Author: dr-apple <dr-apple@users.noreply.github.com>
+Depends: firmware (>= 12.0), python3, openssl
+Installed-Size: 10
+Homepage: https://github.com/dr-apple/showcase-for-tesla
+Icon: https://dr-apple.github.io/showcase-for-tesla/CydiaIcon.png
+Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
+ Solange der Hotspot des iPads läuft (Showcase mit CarPlay verbunden), gibt
+ dieser Dienst dem Hotspot zusätzlich die Adresse 100.96.0.1 und zeigt eine
+ Testseite auf http(s)://100.96.0.1 und http(s)://172.20.10.1. Im
+ Tesla-Browser öffnen; /log zeigt alle Aufrufe. Ohne Hotspot lauscht nichts.
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.1~nettest1_iphoneos-arm64.deb
+Size: 5918
+MD5sum: c3e3e3d6bfed6f97eefc10b042ca0eb1
+SHA1: 66bbf2e2feb5f0950e9d8fb36667ad7cffbb6e0c
+SHA256: 9993942c29c72a7f18cc44abf27512e8e5563a2f154739a41471922a9b4721cf
+
+Package: com.dr-apple.showcase-for-tesla
+Name: Showcase for Tesla (Rootful, Netzwerktest)
+Version: 0.1~nettest1
+Architecture: iphoneos-arm
+Section: Utilities
+Maintainer: dr-apple <dr-apple@users.noreply.github.com>
+Author: dr-apple <dr-apple@users.noreply.github.com>
+Depends: firmware (>= 12.0), python3, openssl
+Installed-Size: 10
+Homepage: https://github.com/dr-apple/showcase-for-tesla
+Icon: https://dr-apple.github.io/showcase-for-tesla/CydiaIcon.png
+Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
+ Solange der Hotspot des iPads läuft (Showcase mit CarPlay verbunden), gibt
+ dieser Dienst dem Hotspot zusätzlich die Adresse 100.96.0.1 und zeigt eine
+ Testseite auf http(s)://100.96.0.1 und http(s)://172.20.10.1. Im
+ Tesla-Browser öffnen; /log zeigt alle Aufrufe. Ohne Hotspot lauscht nichts.
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.1~nettest1_iphoneos-arm.deb
+Size: 5886
+MD5sum: 13cb957cb7afb28ab9bf62789666b08e
+SHA1: c6d078ced77f580ef322dc696b6177f395660b95
+SHA256: ea1b86967b917c9affb8f54d2ed4ab71919ec651f9076aba8a5505e759ca13cf

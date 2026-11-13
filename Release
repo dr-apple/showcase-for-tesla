@@ -1,0 +1,21 @@
+Origin: Showcase for Tesla
+Label: Showcase for Tesla
+Suite: stable
+Version: 1.0
+Codename: ios
+Architectures: iphoneos-arm iphoneos-arm64
+Components: main
+Description: CarPlay im Tesla-Browser über Showcase (in Entwicklung).
+Date: Fri, 13 Nov 2026 17:05:23 UTC
+MD5Sum:
+ 0108befefc701937456ec27c904a6963 2172 Packages
+ 3798000d46df869ec9818b44462dc8ec 773 Packages.gz
+ b23c294029d229d69c407d58611917cf 944 Packages.bz2
+SHA1:
+ 634a74ed5b3be2794ddf3119fb292bf3a759acc7 2172 Packages
+ 5b607310bfe1f270e34f34e38422845c625250e6 773 Packages.gz
+ 4ecd2c8b033b0540e5f3a952849e330353be02ff 944 Packages.bz2
+SHA256:
+ 7168fe20a8e212309c048d0fb3159f5628acc8ef382774e52b0a9e8b69e64b9b 2172 Packages
+ 7bed9b3bdb7204f5b031ae904e86b3173619c15b2e16afc8fb46f9c16ffd00d3 773 Packages.gz
+ 2807b41a2f9e1ba06f9faf9e458cb717debee729de07d94c05a4d9039a3145b0 944 Packages.bz2
