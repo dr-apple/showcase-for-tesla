@@ -24,7 +24,7 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.5'
+VERSION = '0.6'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
 import dhcpsniff  # noqa: E402
@@ -49,6 +49,7 @@ def tool(*names):
 MODE_CHANGED = threading.Event()
 IFCONFIG = tool('/var/jb/usr/sbin/ifconfig', '/var/jb/sbin/ifconfig', '/var/jb/usr/bin/ifconfig',
                 '/usr/sbin/ifconfig', '/sbin/ifconfig')
+LAUNCHCTL_PATH = tool('/var/jb/usr/bin/launchctl', '/var/jb/bin/launchctl', '/usr/bin/launchctl', '/bin/launchctl')
 ARP_PATH = tool('/var/jb/usr/sbin/arp', '/var/jb/usr/bin/arp', '/usr/sbin/arp')
 STATE = {'hotspot': None, 'alias': None, 'listening': [], 'last_error': ''}
 MODES = {'lo0': 'auf lo0 (Standard, lässt den Hotspot unangetastet)',
@@ -172,29 +173,119 @@ def arp_table():
 
 
 DHCP_FILE = os.path.join(CERT_DIR, 'dhcp')
-DHCP = {'server': None, 'state': '–'}
+DHCP = {'server': None, 'state': '–', 'bootpd_paused': False}
+DHCP_MODES = {'replace': 'übernehmen (Tesla bekommt Router/DNS, iPhone wie bisher)',
+              'auto': 'nur wenn iOS keinen DHCP-Server startet',
+              'off': 'aus (nur iOS)'}
+LAUNCHCTL = LAUNCHCTL_PATH
 
 
 def read_dhcp_mode():
     try:
         m = open(DHCP_FILE).read().strip()
-        return m if m in ('auto', 'off') else 'auto'
+        return m if m in DHCP_MODES else 'replace'
     except OSError:
-        return 'auto'
+        return 'replace'
+
+
+def bootpd_plist():
+    """iOS's DHCP server job (com.apple.bootpd, socket-activated on port 67)."""
+    import glob
+    import plistlib
+    for path in sorted(glob.glob('/System/Library/LaunchDaemons/*.plist')):
+        if 'boot' not in os.path.basename(path).lower():
+            continue
+        try:
+            with open(path, 'rb') as f:
+                pl = plistlib.load(f)
+        except Exception:
+            continue
+        prog = ' '.join([pl.get('Program', '')] + list(pl.get('ProgramArguments', [])))
+        if 'bootpd' in prog or pl.get('Label') == 'com.apple.bootpd':
+            return path, pl.get('Label', 'com.apple.bootpd')
+    return None, 'com.apple.bootpd'
+
+
+def port67_free():
+    import socket
+    u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        u.bind(('0.0.0.0', 67))
+        return True
+    except OSError:
+        return False
+    finally:
+        u.close()
+
+
+def launchctl(*args):
+    if not LAUNCHCTL:
+        return 'launchctl fehlt'
+    r = subprocess.run([LAUNCHCTL, *args], capture_output=True, text=True, timeout=15)
+    return (r.stdout + r.stderr).strip() or f'rc={r.returncode}'
+
+
+def pause_bootpd():
+    path, label = bootpd_plist()
+    log(f'DHCP: pausiere iOS-DHCP ({label}, {path or "Plist nicht gefunden"})')
+    attempts = ([('unload', path)] if path else []) + [('bootout', f'system/{label}')]
+    for args in attempts:
+        out = launchctl(*args)
+        time.sleep(0.5)
+        if port67_free():
+            DHCP['bootpd_paused'] = True
+            log(f'DHCP: iOS-DHCP pausiert ({args[0]})')
+            return True
+        log(f'DHCP: {args[0]} reichte nicht: {out}')
+    subprocess.run(['killall', 'bootpd'], capture_output=True)
+    time.sleep(0.5)
+    if port67_free():
+        DHCP['bootpd_paused'] = True
+        return True
+    resume_bootpd()
+    return False
+
+
+def resume_bootpd():
+    """Give port 67 back to iOS. With socket activation, launchd holds the port
+    again as soon as the job is loaded, so a busy port means it worked."""
+    if not DHCP['bootpd_paused']:
+        return
+    path, label = bootpd_plist()
+    outs = []
+    if path:
+        outs.append(launchctl('load', path))
+        if port67_free():
+            outs.append(launchctl('bootstrap', 'system', path))
+    ok = not port67_free()
+    DHCP['bootpd_paused'] = not ok
+    log(f"DHCP: iOS-DHCP {'wieder an' if ok else 'NICHT wieder an – Neustart des iPads behebt das'} ({' | '.join(outs)})")
+
+
+def needs_gateway(mac, host):
+    return mac.startswith(TESLA_OUI) or host.lower().startswith('tesla')
 
 
 def start_dhcp(iface):
-    if read_dhcp_mode() == 'off':
-        DHCP['state'] = 'aus (in den Einstellungen abgeschaltet)'
+    mode = read_dhcp_mode()
+    if mode == 'off':
+        DHCP['state'] = 'aus – iOS vergibt die Adressen'
         return
-    srv = dhcpd.DHCPServer(iface, server_ip=HOTSPOT_IP, log=log, taken=arp_table)
+    if mode == 'replace' and not port67_free():
+        if not pause_bootpd():
+            DHCP['state'] = 'iOS-DHCP ließ sich nicht pausieren – iOS vergibt die Adressen'
+            log(f'DHCP: {DHCP["state"]}')
+            return
+    srv = dhcpd.DHCPServer(iface, server_ip=HOTSPOT_IP, log=log, taken=arp_table,
+                           gateway_for=needs_gateway)
     try:
         srv.start()
         DHCP['server'] = srv
-        DHCP['state'] = 'eigener Server aktiv'
+        DHCP['state'] = 'eigener Server aktiv' + (' (iOS-DHCP pausiert)' if DHCP['bootpd_paused'] else '')
     except OSError as e:
         DHCP['state'] = 'iOS vergibt die Adressen (Port 67 belegt)' if e.errno in (48, 98) else f'Fehler: {e}'
         log(f'DHCP: {DHCP["state"]}')
+        resume_bootpd()
 
 
 def stop_dhcp():
@@ -202,6 +293,7 @@ def stop_dhcp():
         DHCP['server'].stop()
         log('DHCP: eigener Server gestoppt')
     DHCP['server'], DHCP['state'] = None, '–'
+    resume_bootpd()
 
 
 TESLA_OUI = ('4c:fc:aa', '98:ed:5c', '54:f8:f0', '0c:29:8f', 'cc:88:26')
@@ -319,7 +411,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 write_mode(m)
                 log(f'Modus gewechselt: {m}')
                 MODE_CHANGED.set()
-            elif self.path == '/dhcp' and m in ('auto', 'off'):
+            elif self.path == '/dhcp' and m in DHCP_MODES:
                 try:
                     with open(DHCP_FILE, 'w') as f:
                         f.write(m)
@@ -382,8 +474,7 @@ def status_page():
         ('Modus', MODES[read_mode()]),
         ('DHCP', (DHCP['state'] + (f" – vergeben: {DHCP['server'].summary()}" if DHCP['server'] else ''))
                  if hs else '– (Hotspot aus)'),
-        ('DHCP-Modus', 'automatisch (eigener Server, wenn iOS keinen startet)' if read_dhcp_mode() == 'auto'
-                       else 'aus'),
+        ('DHCP-Modus', DHCP_MODES[read_dhcp_mode()]),
         ('Geräte im Hotspot', hotspot_clients() if hs else '–'),
         ('ifconfig', IFCONFIG or 'fehlt – in Sileo „network-cmds“ installieren'),
         ('HTTPS-Zertifikat', 'vorhanden' if HAVE_TLS else 'fehlt'),
@@ -406,7 +497,7 @@ def status_page():
                 for m in MODES) + '</p><p>Eigener DHCP-Server: ' + ''.join(
                 f'<form method="post" action="/dhcp" style="display:inline">'
                 f'<button name="m" value="{m}" style="font-size:18px;margin:4px;padding:10px 14px">{m}</button></form>'
-                for m in ('auto', 'off')) + '</p>'
+                for m in DHCP_MODES) + '</p>'
             '<p><a style="color:#4c8dff" href="/log">Protokoll</a> · aktualisiert sich alle 3 s</p>')
 
 
@@ -443,6 +534,17 @@ def start_servers(addresses, ports=None):
 
 
 def main():
+    import signal
+
+    def shutdown(signum, frame):
+        log(f'beendet (Signal {signum}), räume auf')
+        stop_dhcp()
+        for iface, ips in ipv4_addresses().items():
+            if ALIAS_IP in ips:
+                set_alias(iface, False)
+        os._exit(0)
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
     log(f'Netzwerktest {VERSION} gestartet, HTTPS {"an" if HAVE_TLS else "aus (kein Zertifikat)"}, '
         f'ifconfig {IFCONFIG or "fehlt"}')
     status = start_servers(['127.0.0.1'], [(STATUS_PORT, False)])

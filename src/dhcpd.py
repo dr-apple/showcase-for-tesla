@@ -1,8 +1,10 @@
 """Minimal DHCP server for the iPad hotspot (172.20.10.0/28).
 
-Runs only when nothing else serves DHCP on the hotspot (port 67 free). Showcase
-starts the hotspot on Wi-Fi-only iPads without an uplink, and iOS then hands
-out no addresses, so a Tesla joining the hotspot gets no IP.
+On a Wi-Fi-only iPad the hotspot has no uplink, and iOS's own DHCP server
+(bootpd) then answers without router and DNS. The iPhone is fine with that
+(it keeps using mobile data), but a Tesla rejects such a lease ("IP address
+could not be detected"). This server answers like bootpd (same mask, lease
+and addresses) and adds router and DNS only for clients that need them.
 """
 import socket
 import struct
@@ -40,14 +42,16 @@ def parse_options(data):
 
 
 class DHCPServer:
-    def __init__(self, iface, server_ip='172.20.10.1', first=5, last=14, netmask='255.255.255.240',
-                 lease=3600, log=print, port=67, client_port=68, reply_addr='255.255.255.255',
-                 taken=lambda: {}):
+    def __init__(self, iface, server_ip='172.20.10.1', first=2, last=14, netmask='255.255.255.240',
+                 lease=86400, log=print, port=67, client_port=68, reply_addr='255.255.255.255',
+                 taken=lambda: {}, gateway_for=lambda mac, host: True):
         self.iface, self.server_ip, self.netmask, self.lease = iface, server_ip, netmask, lease
         prefix = server_ip.rsplit('.', 1)[0]
         self.pool = [f'{prefix}.{n}' for n in range(first, last + 1)]
         self.log, self.port, self.client_port, self.reply_addr = log, port, client_port, reply_addr
         self.taken = taken            # {ip: mac} seen in the ARP table
+        self.gateway_for = gateway_for  # (mac, hostname) -> include router and DNS?
+        self.hosts = {}               # mac -> hostname
         self.leases = {}              # mac -> (ip, expires)
         self.sock = None
         self.running = False
@@ -112,13 +116,16 @@ class DHCPServer:
         opts = parse_options(data[240:])
         mtype = opts.get(53, b'\0')[0]
         wanted = b2ip(opts[50]) if 50 in opts and len(opts[50]) == 4 else None
-        host = opts.get(12, b'').decode(errors='ignore')
+        host = opts.get(12, b'').decode(errors='ignore') or self.hosts.get(mac, '')
+        if host:
+            self.hosts[mac] = host
+        gw = bool(self.gateway_for(mac, host))
         if mtype == DISCOVER:
             ip = self.pick(mac, wanted)
             if ip:
                 self.leases[mac] = (ip, time.time() + 60)
-                self.reply(OFFER, xid, flags, chaddr, ip)
-                self.log(f'DHCP: Angebot {ip} an {mac} {host}')
+                self.reply(OFFER, xid, flags, chaddr, ip, gw)
+                self.log(f"DHCP: Angebot {ip} an {mac} {host}{' mit Router/DNS' if gw else ''}")
         elif mtype == REQUEST:
             ip = wanted or (b2ip(ciaddr) if ciaddr != b'\0\0\0\0' else None)
             server = b2ip(opts[54]) if 54 in opts and len(opts[54]) == 4 else None
@@ -126,15 +133,15 @@ class DHCPServer:
                 return                          # client chose another server
             if ip and ip in self.pool and self.pick(mac, ip) == ip:
                 self.leases[mac] = (ip, time.time() + self.lease)
-                self.reply(ACK, xid, flags, chaddr, ip)
-                self.log(f'DHCP: {ip} vergeben an {mac} {host}')
+                self.reply(ACK, xid, flags, chaddr, ip, gw)
+                self.log(f"DHCP: {ip} vergeben an {mac} {host}{' mit Router/DNS' if gw else ''}")
             else:
-                self.reply(NAK, xid, flags, chaddr, '0.0.0.0')
+                self.reply(NAK, xid, flags, chaddr, '0.0.0.0', False)
                 self.log(f'DHCP: Anfrage {ip} von {mac} abgelehnt')
         elif mtype in (RELEASE, DECLINE):
             self.leases.pop(mac, None)
 
-    def reply(self, mtype, xid, flags, chaddr, ip):
+    def reply(self, mtype, xid, flags, chaddr, ip, gateway):
         pkt = bytearray(240)
         pkt[0], pkt[1], pkt[2] = 2, 1, 6
         pkt[4:8], pkt[10:12] = xid, flags
@@ -146,9 +153,9 @@ class DHCPServer:
         if mtype != NAK:
             o += bytes([51, 4]) + struct.pack('!I', self.lease)
             o += bytes([1, 4]) + ip2b(self.netmask)
-            o += bytes([3, 4]) + ip2b(self.server_ip)
-            o += bytes([6, 4]) + ip2b(self.server_ip)
-            o += bytes([28, 4]) + ip2b(self.broadcast())
+            if gateway:
+                o += bytes([3, 4]) + ip2b(self.server_ip)
+                o += bytes([6, 4]) + ip2b(self.server_ip)
         o += b'\xff'
         self.sock.sendto(bytes(pkt + o), (self.reply_addr, self.client_port))
 

@@ -8,7 +8,7 @@ Work in progress: wireless CarPlay in the Tesla browser, built on [Showcase](htt
 https://dr-apple.github.io/showcase-for-tesla
 ```
 
-## Current package: network test (0.5~nettest5)
+## Current package: network test (0.6~nettest6)
 
 Not CarPlay yet. Checks that the Tesla can reach the iPad over the iPad's hotspot.
 
@@ -17,7 +17,7 @@ Not CarPlay yet. Checks that the Tesla can reach the iPad over the iPad's hotspo
 - While the hotspot (172.20.10.1) is up, a background service adds `100.96.0.1/32` (default on `lo0`, so the hotspot subnet and its DHCP server stay untouched; switchable on the status page to the hotspot interface or off) (the Tesla browser blocks private addresses but allows 100.64.0.0/10) and serves a test page on:
   - `http://100.96.0.1/` and `https://100.96.0.1/`
   - `http://172.20.10.1/` and `https://172.20.10.1/` (self-signed certificate)
-- If iOS hands out no addresses on the hotspot (seen on a Wi-Fi-only iPad: the Tesla joined but got no IP), a built-in DHCP server ([`src/dhcpd.py`](src/dhcpd.py)) serves 172.20.10.5–14. It only starts when port 67 is free, and can be turned off on the status page.
+- DHCP: on a Wi-Fi-only iPad, iOS's own DHCP server (bootpd) answers without router and DNS (no uplink), and the Tesla rejects that lease ("IP address could not be detected"). While CarPlay runs, the service pauses bootpd and serves DHCP itself ([`src/dhcpd.py`](src/dhcpd.py)): the Tesla gets router and DNS 172.20.10.1, every other client (the iPhone) gets the same answer as from iOS, so it keeps using mobile data. bootpd is loaded again when the hotspot stops, the service stops or the package is removed. Switchable on the status page (replace / auto / off). A passive DHCP log ([`src/dhcpsniff.py`](src/dhcpsniff.py)) shows every request and answer.
 - The page shows whether it counts as a secure context, whether WebCodecs is there, and whether a (secure) WebSocket works. `/log` lists every visit.
 - When the hotspot stops, the servers stop and the extra address is removed. Nothing listens at home.
 
