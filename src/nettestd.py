@@ -24,7 +24,9 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.3'
+VERSION = '0.4'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
+import dhcpd  # noqa: E402
 STATUS_PORT = int(os.environ.get('STATUS_PORT', '8080'))
 
 LOG = collections.deque(maxlen=200)
@@ -153,6 +155,54 @@ def _dhcp_probe():
         u.close()
 
 
+def arp_table():
+    """{ip: mac} for complete ARP entries on the hotspot subnet."""
+    if not ARP:
+        return {}
+    try:
+        out = subprocess.run([ARP, '-an'], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return {}
+    table = {}
+    for ip, mac in re.findall(r'\((172\.20\.10\.\d+)\) at ([0-9a-f:]+)', out):
+        mac = ':'.join(x.zfill(2) for x in mac.split(':'))
+        table[ip] = mac
+    return table
+
+
+DHCP_FILE = os.path.join(CERT_DIR, 'dhcp')
+DHCP = {'server': None, 'state': '–'}
+
+
+def read_dhcp_mode():
+    try:
+        m = open(DHCP_FILE).read().strip()
+        return m if m in ('auto', 'off') else 'auto'
+    except OSError:
+        return 'auto'
+
+
+def start_dhcp(iface):
+    if read_dhcp_mode() == 'off':
+        DHCP['state'] = 'aus (in den Einstellungen abgeschaltet)'
+        return
+    srv = dhcpd.DHCPServer(iface, server_ip=HOTSPOT_IP, log=log, taken=arp_table)
+    try:
+        srv.start()
+        DHCP['server'] = srv
+        DHCP['state'] = 'eigener Server aktiv'
+    except OSError as e:
+        DHCP['state'] = 'iOS vergibt die Adressen (Port 67 belegt)' if e.errno in (48, 98) else f'Fehler: {e}'
+        log(f'DHCP: {DHCP["state"]}')
+
+
+def stop_dhcp():
+    if DHCP['server']:
+        DHCP['server'].stop()
+        log('DHCP: eigener Server gestoppt')
+    DHCP['server'], DHCP['state'] = None, '–'
+
+
 def hotspot_clients():
     if not ARP:
         return 'arp fehlt'
@@ -245,11 +295,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         data = self.rfile.read(int(self.headers.get('Content-Length', 0) or 0))
-        if self.path == '/mode' and self.server.server_address == ('127.0.0.1', STATUS_PORT):
+        if self.path in ('/mode', '/dhcp') and self.server.server_address == ('127.0.0.1', STATUS_PORT):
             m = data.decode(errors='ignore').partition('m=')[2].strip()
-            if m in MODES:
+            if self.path == '/mode' and m in MODES:
                 write_mode(m)
                 log(f'Modus gewechselt: {m}')
+                MODE_CHANGED.set()
+            elif self.path == '/dhcp' and m in ('auto', 'off'):
+                try:
+                    with open(DHCP_FILE, 'w') as f:
+                        f.write(m)
+                except OSError as e:
+                    STATE['last_error'] = f'DHCP-Modus nicht gespeichert: {e}'
+                log(f'DHCP-Modus: {m}')
                 MODE_CHANGED.set()
             self.send_response(303)
             self.send_header('Location', '/')
@@ -302,7 +360,10 @@ def status_page():
         ('Hotspot 172.20.10.1', f'erkannt auf {hs}' if hs else 'nicht gefunden – CarPlay in Showcase starten'),
         ('Adresse 100.96.0.1', f"gesetzt auf {STATE['alias']}" if STATE['alias'] else 'nicht gesetzt'),
         ('Modus', MODES[read_mode()]),
-        ('DHCP-Server', dhcp_server_state() if hs else '– (Hotspot aus)'),
+        ('DHCP', (DHCP['state'] + (f" – vergeben: {DHCP['server'].summary()}" if DHCP['server'] else ''))
+                 if hs else '– (Hotspot aus)'),
+        ('DHCP-Modus', 'automatisch (eigener Server, wenn iOS keinen startet)' if read_dhcp_mode() == 'auto'
+                       else 'aus'),
         ('Geräte im Hotspot', hotspot_clients() if hs else '–'),
         ('ifconfig', IFCONFIG or 'fehlt – in Sileo „network-cmds“ installieren'),
         ('HTTPS-Zertifikat', 'vorhanden' if HAVE_TLS else 'fehlt'),
@@ -322,7 +383,10 @@ def status_page():
             '<p>100.96.0.1 setzen: ' + ''.join(
                 f'<form method="post" action="/mode" style="display:inline">'
                 f'<button name="m" value="{m}" style="font-size:18px;margin:4px;padding:10px 14px">{m}</button></form>'
-                for m in MODES) + '</p>'
+                for m in MODES) + '</p><p>Eigener DHCP-Server: ' + ''.join(
+                f'<form method="post" action="/dhcp" style="display:inline">'
+                f'<button name="m" value="{m}" style="font-size:18px;margin:4px;padding:10px 14px">{m}</button></form>'
+                for m in ('auto', 'off')) + '</p>'
             '<p><a style="color:#4c8dff" href="/log">Protokoll</a> · aktualisiert sich alle 3 s</p>')
 
 
@@ -371,6 +435,7 @@ def main():
 
     def stop_all():
         nonlocal servers
+        stop_dhcp()
         for srv in servers:
             srv.shutdown()
             srv.server_close()
@@ -394,6 +459,7 @@ def main():
                 holder = target
             time.sleep(1)
         STATE['alias'] = holder
+        start_dhcp(hotspot_iface)
         servers = start_servers(([ALIAS_IP] if holder else []) + [HOTSPOT_IP])
 
     while True:
