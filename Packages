@@ -1,6 +1,6 @@
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootless, Netzwerktest)
-Version: 0.9~nettest9
+Version: 0.10~nettest10
 Architecture: iphoneos-arm64
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
@@ -17,15 +17,15 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  Übernimmt während CarPlay die Adressvergabe im Hotspot, damit der Tesla
  Router und DNS bekommt (iOS lässt beides ohne Internet weg).
  Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.9~nettest9_iphoneos-arm64.deb
-Size: 16292
-MD5sum: 000b99f5f74987e90dbadab607b4addc
-SHA1: 0e19f10d2fce86f16aa7088687e92d295d7b70ba
-SHA256: 9eb8c7527459377dae20c12a8e01ace3c1a715bf016e7b828086d0568d5ed801
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.10~nettest10_iphoneos-arm64.deb
+Size: 16322
+MD5sum: 51b014ec6eea923bcac63c7eb58d3cf8
+SHA1: cc050609f8becd7cc74db36b35fd202c12f8783e
+SHA256: 622ea561d9ad543a4a958988181ff4de8b3e1679ca60aee9bc018d35ac4d577e
 
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootful, Netzwerktest)
-Version: 0.9~nettest9
+Version: 0.10~nettest10
 Architecture: iphoneos-arm
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
@@ -42,8 +42,8 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  Übernimmt während CarPlay die Adressvergabe im Hotspot, damit der Tesla
  Router und DNS bekommt (iOS lässt beides ohne Internet weg).
  Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.9~nettest9_iphoneos-arm.deb
-Size: 16268
-MD5sum: 79b33b56267128dce670d15b6780f289
-SHA1: 55766e17499d7e90bee6047cfcefdb8a9aec9419
-SHA256: de3dfe993f59a29bc77571433df57888d5db2970ff3dbcfa58be05315bc692e9
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.10~nettest10_iphoneos-arm.deb
+Size: 16294
+MD5sum: d85e0d22da314509474241f6b5390618
+SHA1: 3f0a0796deec9f8434e9fd24159460840b79501e
+SHA256: f014124473d84735f7b4a7bdaf4fd9e4a0d840b5185cc0d2d06d15bf1ec4d6e7

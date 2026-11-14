@@ -24,7 +24,7 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.9'
+VERSION = '0.10'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
 import dhcpsniff  # noqa: E402
@@ -443,8 +443,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-ConnMan-Status', 'online')   # the Tesla's ConnMan online check
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != 'HEAD':
+            self.wfile.write(body)
 
     def do_GET(self):
         if self.server.server_address[0] == '127.0.0.1' and self.server.server_address[1] == STATUS_PORT \
