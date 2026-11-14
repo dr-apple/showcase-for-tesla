@@ -86,6 +86,60 @@ def parse_frame(frame):
     return frame[udp + 8:]
 
 
+PROTO = {1: 'ICMP', 6: 'TCP', 17: 'UDP', 58: 'ICMPv6'}
+PORT_NAMES = {53: 'DNS', 80: 'HTTP', 123: 'NTP', 443: 'HTTPS', 853: 'DNS-over-TLS', 1883: 'MQTT', 8883: 'MQTT-TLS',
+              5353: 'mDNS', 67: 'DHCP', 68: 'DHCP', 5355: 'LLMNR', 1900: 'SSDP', 3478: 'STUN'}
+
+
+def describe_traffic(frame, own_ip='172.20.10.1'):
+    """Short summary of what a client sends (not DHCP), or None."""
+    if len(frame) < 14:
+        return None
+    src_mac = ':'.join(f'{b:02x}' for b in frame[6:12])
+    off = 12
+    et = struct.unpack('!H', frame[off:off + 2])[0]
+    off += 2
+    if et == 0x8100:
+        et = struct.unpack('!H', frame[off + 2:off + 4])[0]
+        off += 4
+    if et == 0x0806 and len(frame) >= off + 28:
+        op = struct.unpack('!H', frame[off + 6:off + 8])[0]
+        if op == 1:
+            return src_mac, f'ARP wer hat {socket.inet_ntoa(frame[off + 24:off + 28])}'
+        return None
+    if et == 0x86dd and len(frame) >= off + 40:
+        nh = frame[off + 6]
+        dst = socket.inet_ntop(socket.AF_INET6, frame[off + 24:off + 40])
+        extra = ''
+        if nh in (6, 17) and len(frame) >= off + 44:
+            dport = struct.unpack('!H', frame[off + 42:off + 44])[0]
+            extra = f':{dport}' + (f' ({PORT_NAMES[dport]})' if dport in PORT_NAMES else '')
+        elif nh == 58 and len(frame) > off + 40:
+            extra = f' Typ {frame[off + 40]}'
+        return src_mac, f'IPv6 {PROTO.get(nh, nh)} → [{dst}]{extra}'
+    if et != 0x0800 or len(frame) < off + 20:
+        return None
+    ihl = (frame[off] & 0x0f) * 4
+    proto = frame[off + 9]
+    dst = socket.inet_ntoa(frame[off + 16:off + 20])
+    l4 = off + ihl
+    if proto == 1 and len(frame) > l4:
+        t = frame[l4]
+        return src_mac, f"Ping → {dst}" if t == 8 else f'ICMP Typ {t} → {dst}'
+    if proto in (6, 17) and len(frame) >= l4 + 4:
+        sport, dport = struct.unpack('!HH', frame[l4:l4 + 4])
+        if proto == 17 and {sport, dport} <= {67, 68}:
+            return None
+        name = f' ({PORT_NAMES[dport]})' if dport in PORT_NAMES else ''
+        if proto == 6:
+            flags = frame[l4 + 13] if len(frame) > l4 + 13 else 0
+            if not (flags & 0x02) or flags & 0x10:      # only the opening SYN
+                return None
+            return src_mac, f'TCP-Verbindung → {dst}:{dport}{name}'
+        return src_mac, f'UDP → {dst}:{dport}{name}'
+    return src_mac, f'IP-Protokoll {proto} → {dst}'
+
+
 def split_bpf(buf):
     """Darwin bpf_hdr: timeval32 (8) + caplen (4) + datalen (4) + hdrlen (2), word aligned."""
     i = 0
@@ -98,8 +152,10 @@ def split_bpf(buf):
 
 
 class Sniffer:
-    def __init__(self, iface, log):
+    def __init__(self, iface, log, watch=lambda mac: False):
         self.iface, self.log, self.fd, self.running = iface, log, None, False
+        self.watch = watch            # mac -> log this client's traffic?
+        self.seen = {}
 
     def start(self):
         for n in range(0, 64):
@@ -145,3 +201,13 @@ class Sniffer:
                     line = describe_dhcp(payload)
                     if line:
                         self.log(line)
+                    continue
+                try:
+                    t = describe_traffic(frame)
+                except Exception:
+                    t = None
+                if t and self.watch(t[0]):
+                    n = self.seen.get(t[1], 0) + 1
+                    self.seen[t[1]] = n
+                    if n <= 2 or n in (10, 100):
+                        self.log(f"Tesla: {t[1]}" + (f'  ({n}×)' if n > 2 else ''))
