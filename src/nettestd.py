@@ -24,10 +24,11 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.7'
+VERSION = '0.8'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
 import dhcpsniff  # noqa: E402
+import dnsd  # noqa: E402
 STATUS_PORT = int(os.environ.get('STATUS_PORT', '8080'))
 
 LOG = collections.deque(maxlen=200)
@@ -334,6 +335,38 @@ def hotspot_clients():
 
 
 SNIFF = {'s': None}
+DNS = {'s': None, 'state': '–'}
+
+
+def start_dns():
+    try:
+        d = dnsd.DNSServer(HOTSPOT_IP, HOTSPOT_IP, log=log)
+        d.start()
+        DNS['s'], DNS['state'] = d, 'aktiv – alle Namen zeigen auf 172.20.10.1'
+    except OSError as e:
+        DNS['state'] = f'nicht möglich: {e}'
+        log(f'DNS: {DNS["state"]}')
+
+
+def stop_dns():
+    if DNS['s']:
+        DNS['s'].stop()
+    DNS['s'], DNS['state'] = None, '–'
+
+
+# Answers to connectivity checks (the Tesla only keeps a Wi-Fi that looks online).
+CHECK_REPLIES = {
+    '/generate_204': (204, b'', 'text/plain'),
+    '/gen_204': (204, b'', 'text/plain'),
+    '/hotspot-detect.html': (200, b'<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>', 'text/html'),
+    '/library/test/success.html': (200, b'<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>', 'text/html'),
+    '/connecttest.txt': (200, b'Microsoft Connect Test', 'text/plain'),
+    '/ncsi.txt': (200, b'Microsoft NCSI', 'text/plain'),
+    '/success.txt': (200, b'success\n', 'text/plain'),
+    '/canonical.html': (200, b'<meta http-equiv="refresh" content="0;url=https://support.mozilla.org/kb/captive-portal"/>', 'text/html'),
+    '/check_network_status.txt': (200, b'NetworkManager is online\n', 'text/plain'),
+}
+OWN_HOSTS = {HOTSPOT_IP, ALIAS_IP, '127.0.0.1', 'localhost'}
 
 
 def start_sniffer(iface):
@@ -417,6 +450,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.server.server_address[0] == '127.0.0.1' and self.server.server_address[1] == STATUS_PORT \
                 and not self.path.startswith(('/log', '/ws', '/report')):
             return self.send(200, status_page().encode())
+        host = (self.headers.get('Host') or '').split(':')[0].lower()
+        if host and host not in OWN_HOSTS:
+            return self.online_check(host)
         if self.path == '/ws' and self.headers.get('Upgrade', '').lower() == 'websocket':
             return self.websocket()
         if self.path.startswith('/log'):
@@ -428,6 +464,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, body)
         page = PAGE.replace('__URLS__', json.dumps(urls())).replace('__VERSION__', VERSION)
         self.send(200, page.encode())
+
+    def online_check(self, host):
+        path = self.path.split('?')[0]
+        code, body, ctype = CHECK_REPLIES.get(path.lower(), (200, b'OK', 'text/plain'))
+        log(f"{self.client_address[0]}  Online-Prüfung http://{host}{self.path} → {code}")
+        self.send_response(code)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('X-ConnMan-Status', 'online')        # ConnMan (Linux) online check
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        if body and self.command != 'HEAD':
+            self.wfile.write(body)
+
+    def do_HEAD(self):
+        host = (self.headers.get('Host') or '').split(':')[0].lower()
+        if host and host not in OWN_HOSTS:
+            return self.online_check(host)
+        self.send(200, b'')
 
     def do_POST(self):
         data = self.rfile.read(int(self.headers.get('Content-Length', 0) or 0))
@@ -501,6 +556,7 @@ def status_page():
         ('DHCP', (DHCP['state'] + (f" – vergeben: {DHCP['server'].summary()}" if DHCP['server'] else ''))
                  if hs else '– (Hotspot aus)'),
         ('DHCP-Modus', DHCP_MODES[read_dhcp_mode()]),
+        ('DNS für den Tesla', DNS['state'] if hs else '–'),
         ('Geräte im Hotspot', hotspot_clients() if hs else '–'),
         ('ifconfig', IFCONFIG or 'fehlt – in Sileo „network-cmds“ installieren'),
         ('HTTPS-Zertifikat', 'vorhanden' if HAVE_TLS else 'fehlt'),
@@ -585,6 +641,7 @@ def main():
         nonlocal servers
         stop_dhcp()
         stop_sniffer()
+        stop_dns()
         for srv in servers:
             srv.shutdown()
             srv.server_close()
@@ -609,6 +666,7 @@ def main():
             time.sleep(1)
         STATE['alias'] = holder
         start_sniffer(hotspot_iface)
+        start_dns()
         start_dhcp(hotspot_iface)
         servers = start_servers(([ALIAS_IP] if holder else []) + [HOTSPOT_IP])
 
