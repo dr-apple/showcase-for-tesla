@@ -8,7 +8,7 @@ Work in progress: wireless CarPlay in the Tesla browser, built on [Showcase](htt
 https://dr-apple.github.io/showcase-for-tesla
 ```
 
-## Current package: network test (0.12~nettest12)
+## Current package: network test (0.13~nettest13)
 
 Not CarPlay yet. Checks that the Tesla can reach the iPad over the iPad's hotspot.
 

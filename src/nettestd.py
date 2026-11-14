@@ -19,12 +19,17 @@ import threading
 import time
 
 ALIAS_IP = os.environ.get('ALIAS_IP', '100.96.0.1')
+# A public address for the Tesla's DNS answers: its resolver drops answers that
+# point public names at private addresses (DNS rebinding protection). This is
+# the real address of connman.vn.tesla.services; it is put on lo0 while the
+# hotspot runs, and the Tesla reaches it through its gateway, the iPad.
+CHECK_IP = os.environ.get('CHECK_IP', '3.160.156.120')
 HOTSPOT_IP = os.environ.get('HOTSPOT_IP', '172.20.10.1')
 HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.12'
+VERSION = '0.13'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
 import dhcpsniff  # noqa: E402
@@ -340,9 +345,9 @@ DNS = {'s': None, 'state': '–'}
 
 def start_dns():
     try:
-        d = dnsd.DNSServer(HOTSPOT_IP, HOTSPOT_IP, log=log)
+        d = dnsd.DNSServer(HOTSPOT_IP, CHECK_IP, log=log)
         d.start()
-        DNS['s'], DNS['state'] = d, 'aktiv – alle Namen zeigen auf 172.20.10.1'
+        DNS['s'], DNS['state'] = d, f'aktiv – alle Namen zeigen auf {CHECK_IP} (liegt auf dem iPad)'
     except OSError as e:
         DNS['state'] = f'nicht möglich: {e}'
         log(f'DNS: {DNS["state"]}')
@@ -367,6 +372,8 @@ CHECK_REPLIES = {
     '/check_network_status.txt': (200, b'NetworkManager is online\n', 'text/plain'),
 }
 OWN_HOSTS = {HOTSPOT_IP, ALIAS_IP, '127.0.0.1', 'localhost'}
+# Exactly what connman.vn.tesla.services serves (46 bytes) with X-ConnMan-Status: online.
+CONNMAN_BODY = b'<html>\n<head>\n</head>\n<body>\n</body>\n</html>\n\n'
 
 
 def start_sniffer(iface):
@@ -384,17 +391,18 @@ def stop_sniffer():
     SNIFF['s'] = None
 
 
-def set_alias(iface, add):
+def set_alias(iface, add, ip=None):
     """/32 alias: the Tesla reaches it through its gateway 172.20.10.1, and the
     hotspot's own subnet (and its DHCP server) stays untouched."""
     if not IFCONFIG:
         STATE['last_error'] = 'ifconfig fehlt (Paket network-cmds), 100.96.0.1 nicht möglich'
         log(STATE['last_error'])
         return False
-    args = [IFCONFIG, iface, 'inet', ALIAS_IP]
+    ip = ip or ALIAS_IP
+    args = [IFCONFIG, iface, 'inet', ip]
     args += ['netmask', '255.255.255.255', 'alias'] if add else ['-alias']
     r = subprocess.run(args, capture_output=True, text=True)
-    log(f"{'+' if add else '-'} {ALIAS_IP} auf {iface}" + (f" ({r.stderr.strip()})" if r.returncode else ''))
+    log(f"{'+' if add else '-'} {ip} auf {iface}" + (f" ({r.stderr.strip()})" if r.returncode else ''))
     if r.returncode:
         STATE['last_error'] = f'ifconfig: {r.stderr.strip()}'
     return r.returncode == 0
@@ -469,7 +477,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def online_check(self, host):
         path = self.path.split('?')[0]
-        code, body, ctype = CHECK_REPLIES.get(path.lower(), (200, b'OK', 'text/plain'))
+        code, body, ctype = CHECK_REPLIES.get(path.lower(), (200, CONNMAN_BODY, 'text/html'))
         scheme = 'https' if isinstance(self.request, ssl.SSLSocket) else 'http'
         log(f"{self.client_address[0]}  Online-Prüfung {self.command} {scheme}://{host}{self.path} → {code}")
         self.send_response(code)
@@ -666,8 +674,9 @@ def main():
         log(f'beendet (Signal {signum}), räume auf')
         stop_dhcp()
         for iface, ips in ipv4_addresses().items():
-            if ALIAS_IP in ips:
-                set_alias(iface, False)
+            for ip in (ALIAS_IP, CHECK_IP):
+                if ip in ips:
+                    set_alias(iface, False, ip)
         os._exit(0)
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
@@ -684,6 +693,8 @@ def main():
     def stop_all():
         nonlocal servers
         stop_dhcp()
+        if STATE.pop('check_ip', None):
+            set_alias('lo0', False, CHECK_IP)
         stop_sniffer()
         stop_dns()
         for srv in servers:
@@ -711,11 +722,15 @@ def main():
         STATE['alias'] = holder
         start_sniffer(hotspot_iface)
         start_dhcp(hotspot_iface)
+        extra = []
         if DHCP['server']:
+            if set_alias('lo0', True, CHECK_IP):
+                STATE['check_ip'] = True
+                extra.append(CHECK_IP)
             start_dns()          # only the Tesla gets this DNS, and only from our DHCP
         else:
             DNS['state'] = 'aus – nur zusammen mit eigenem DHCP-Server'
-        servers = start_servers(([ALIAS_IP] if holder else []) + [HOTSPOT_IP])
+        servers = start_servers(([ALIAS_IP] if holder else []) + [HOTSPOT_IP] + extra)
 
     while True:
         found = hotspot_interface()
@@ -736,6 +751,11 @@ def main():
             holder = alias_holder()
             if holder:
                 set_alias(holder, False)
+            try:
+                if CHECK_IP in ipv4_addresses().get('lo0', []):
+                    set_alias('lo0', False, CHECK_IP)
+            except Exception:
+                pass
         MODE_CHANGED.wait(3)
 
 if __name__ == '__main__':
