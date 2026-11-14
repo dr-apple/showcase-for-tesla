@@ -6,16 +6,16 @@ Codename: ios
 Architectures: iphoneos-arm iphoneos-arm64
 Components: main
 Description: CarPlay im Tesla-Browser über Showcase (in Entwicklung).
-Date: Sat, 14 Nov 2026 11:40:30 UTC
+Date: Sat, 14 Nov 2026 11:56:00 UTC
 MD5Sum:
- f43ce7f2d240fc59381119ade6e88915 2498 Packages
- bd59be010ee1801e7fe70f18629cc3a2 869 Packages.gz
- fa8aff1e7763bfdfaaad3c936cc68a14 1054 Packages.bz2
+ 02830ec796026b3cf0ebb5e70596ef61 2498 Packages
+ 674036a3c5af490bb924bbaa1c862cf8 869 Packages.gz
+ 6aee0fd570914870415659025ee4bbc3 1047 Packages.bz2
 SHA1:
- a852f3a4f41570d4c9574e5669859aa10d96a0f3 2498 Packages
- bc23a16d4d95a813f34c402696925bbc0e689877 869 Packages.gz
- d7841c530880cec873ba2230bd21ab1328712ccb 1054 Packages.bz2
+ f061fb5ac8911d7c0d35d78846407b0d45dac65a 2498 Packages
+ 88ff23c18e8ab257e05592dd232bb90419d49bc6 869 Packages.gz
+ 78d7954c28149c8b8a898b17473c8955763b8c36 1047 Packages.bz2
 SHA256:
- 5d8c078cfd7959e5260367efcb13ce93d53273b54d1551f45215fbed9a529646 2498 Packages
- 0329a9c5aea77f3bd8add257e813ba68008091c11bf29e6411dc7b52be867903 869 Packages.gz
- 4a6cffc1a95cbf0909728dc375f8fa9ae5e838f18ec5ade3de723ac64ed27cf9 1054 Packages.bz2
+ 5a447545f9ab5f6460b21432dfae1615ac2973c06429ad76cb9f09309b4131a0 2498 Packages
+ 3a47683a8477955334c666b4d50d8f88f062911cde0f081004286ac66f123f29 869 Packages.gz
+ d45f1d08075f6f113c2e7d695753150571fbb3161d6bda97d2cfab3bdcc76bd9 1047 Packages.bz2

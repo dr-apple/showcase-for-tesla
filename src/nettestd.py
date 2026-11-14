@@ -24,9 +24,10 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.4'
+VERSION = '0.5'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
+import dhcpsniff  # noqa: E402
 STATUS_PORT = int(os.environ.get('STATUS_PORT', '8080'))
 
 LOG = collections.deque(maxlen=200)
@@ -203,16 +204,33 @@ def stop_dhcp():
     DHCP['server'], DHCP['state'] = None, '–'
 
 
+TESLA_OUI = ('4c:fc:aa', '98:ed:5c', '54:f8:f0', '0c:29:8f', 'cc:88:26')
+
+
 def hotspot_clients():
     if not ARP:
         return 'arp fehlt'
+    table = {ip: mac for ip, mac in arp_table().items() if ip != HOTSPOT_IP}
+    return ', '.join(f"{ip} ({mac}{' = Tesla' if mac.startswith(TESLA_OUI) else ''})"
+                     for ip, mac in sorted(table.items())) or 'keine'
+
+
+SNIFF = {'s': None}
+
+
+def start_sniffer(iface):
     try:
-        out = subprocess.run([ARP, '-an'], capture_output=True, text=True, timeout=5).stdout
+        s = dhcpsniff.Sniffer(iface, log)
+        s.start()
+        SNIFF['s'] = s
     except Exception as e:
-        return f'Fehler: {e}'
-    ips = re.findall(r'\((172\.20\.10\.\d+)\) at ([0-9a-f:]+)', out)
-    ips = [f'{ip}' for ip, mac in ips if ip != HOTSPOT_IP and 'incomplete' not in mac]
-    return ', '.join(ips) or 'keine'
+        log(f'DHCP-Mitschnitt nicht möglich: {e}')
+
+
+def stop_sniffer():
+    if SNIFF['s']:
+        SNIFF['s'].stop()
+    SNIFF['s'] = None
 
 
 def set_alias(iface, add):
@@ -349,6 +367,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.close_connection = True
 
     def log_message(self, fmt, *args):
+        if self.server.server_address == ('127.0.0.1', STATUS_PORT):
+            return                                   # the iPad's own status page
         if self.path not in ('/report',) and not self.path.startswith('/log'):
             log(f"{self.client_address[0]}  {fmt % args}")
 
@@ -436,6 +456,7 @@ def main():
     def stop_all():
         nonlocal servers
         stop_dhcp()
+        stop_sniffer()
         for srv in servers:
             srv.shutdown()
             srv.server_close()
@@ -459,6 +480,7 @@ def main():
                 holder = target
             time.sleep(1)
         STATE['alias'] = holder
+        start_sniffer(hotspot_iface)
         start_dhcp(hotspot_iface)
         servers = start_servers(([ALIAS_IP] if holder else []) + [HOTSPOT_IP])
 

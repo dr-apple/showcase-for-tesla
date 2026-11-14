@@ -1,12 +1,12 @@
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootless, Netzwerktest)
-Version: 0.4~nettest4
+Version: 0.5~nettest5
 Architecture: iphoneos-arm64
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
 Author: dr-apple <dr-apple@users.noreply.github.com>
 Depends: firmware (>= 12.0), python3, openssl, network-cmds
-Installed-Size: 27
+Installed-Size: 32
 Homepage: https://github.com/dr-apple/showcase-for-tesla
 Icon: https://dr-apple.github.io/showcase-for-tesla/CydiaIcon.png
 Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
@@ -16,21 +16,21 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  Tesla-Browser öffnen; /log zeigt alle Aufrufe. Ohne Hotspot lauscht nichts.
  Vergibt iOS im Hotspot keine Adressen, startet ein eigener DHCP-Server.
  Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.4~nettest4_iphoneos-arm64.deb
-Size: 11070
-MD5sum: 198da2c0d523c60d106b0c7dd03e224b
-SHA1: a12b7af500f8e6d8f7deb3edf6a07739d136ff6a
-SHA256: f305ad36f71375d3df6498c45662738f5ed3affb8e9ebdfd09282bf04ef4a41d
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.5~nettest5_iphoneos-arm64.deb
+Size: 12586
+MD5sum: 5614f84b6ad3bb0d6e59fa8b41e70aab
+SHA1: 0aa9907790cc504a37f071c6a653f33b38cfa783
+SHA256: dd9562983ce659da7b575ccc49f13c925a2653e0800d943c5cfd79a332d90509
 
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootful, Netzwerktest)
-Version: 0.4~nettest4
+Version: 0.5~nettest5
 Architecture: iphoneos-arm
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
 Author: dr-apple <dr-apple@users.noreply.github.com>
 Depends: firmware (>= 12.0), python3, openssl, network-cmds
-Installed-Size: 27
+Installed-Size: 32
 Homepage: https://github.com/dr-apple/showcase-for-tesla
 Icon: https://dr-apple.github.io/showcase-for-tesla/CydiaIcon.png
 Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
@@ -40,8 +40,8 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  Tesla-Browser öffnen; /log zeigt alle Aufrufe. Ohne Hotspot lauscht nichts.
  Vergibt iOS im Hotspot keine Adressen, startet ein eigener DHCP-Server.
  Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.4~nettest4_iphoneos-arm.deb
-Size: 11032
-MD5sum: dd15f35e4c92edbf398b015b08adb59c
-SHA1: fc669275992f845dc426295a4f9bd8fd8e139e55
-SHA256: 0b066e781e41af44f8acf34006fbea788eb49319bea3271668306a389b0b13a3
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.5~nettest5_iphoneos-arm.deb
+Size: 12556
+MD5sum: 2e2ffbb35f01e3e727355b902060ee48
+SHA1: 3c474c263a2a8589c2c3cdbf68683ae6efaeb79a
+SHA256: f7447e18fc5318734aeba9e281c155cd174735c53a6fa9b6f38409d687419e1b
