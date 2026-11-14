@@ -24,7 +24,7 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.8'
+VERSION = '0.9'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
 import dhcpsniff  # noqa: E402
@@ -468,7 +468,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def online_check(self, host):
         path = self.path.split('?')[0]
         code, body, ctype = CHECK_REPLIES.get(path.lower(), (200, b'OK', 'text/plain'))
-        log(f"{self.client_address[0]}  Online-Prüfung http://{host}{self.path} → {code}")
+        scheme = 'https' if isinstance(self.request, ssl.SSLSocket) else 'http'
+        log(f"{self.client_address[0]}  Online-Prüfung {self.command} {scheme}://{host}{self.path} → {code}")
         self.send_response(code)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))
@@ -542,8 +543,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         if self.server.server_address == ('127.0.0.1', STATUS_PORT):
             return                                   # the iPad's own status page
-        if self.path not in ('/report',) and not self.path.startswith('/log'):
-            log(f"{self.client_address[0]}  {fmt % args}")
+        path = getattr(self, 'path', '')
+        if path == '/report' or path.startswith('/log'):
+            return
+        headers = getattr(self, 'headers', None)
+        host = headers.get('Host', '-') if headers else '-'
+        sni = getattr(self.request, 'sni_name', None)
+        scheme = 'https' if isinstance(self.request, ssl.SSLSocket) else 'http'
+        log(f"{self.client_address[0]}  {scheme}://{host}  {fmt % args}" + (f"  (SNI {sni})" if sni else ''))
 
 
 def status_page():
@@ -588,6 +595,40 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
+_TLS_LOCAL = threading.local()
+
+
+def _remember_sni(sslsock, name, ctx):
+    _TLS_LOCAL.name = name
+
+
+class TLSServer(Server):
+    """HTTPS with the handshake done per connection, so failed handshakes are
+    logged together with the host name the client asked for (SNI)."""
+    def __init__(self, addr, handler, ctx):
+        self.ctx = ctx
+        ctx.sni_callback = _remember_sni
+        super().__init__(addr, handler)
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        sock.settimeout(8)
+        _TLS_LOCAL.name = None
+        try:
+            tls = self.ctx.wrap_socket(sock, server_side=True)
+        except (ssl.SSLError, OSError) as e:
+            log(f"{addr[0]}  HTTPS-Aufbau abgelehnt für {_TLS_LOCAL.name or '(ohne Namen)'}: "
+                f"{getattr(e, 'reason', None) or e}")
+            try:
+                sock.close()
+            except OSError:
+                pass
+            raise
+        tls.settimeout(None)
+        tls.sni_name = _TLS_LOCAL.name
+        return tls, addr
+
+
 CERT = os.path.join(CERT_DIR, 'cert.pem')
 KEY = os.path.join(CERT_DIR, 'key.pem')
 HAVE_TLS = os.path.exists(CERT) and os.path.exists(KEY)
@@ -600,11 +641,12 @@ def start_servers(addresses, ports=None):
             if tls and not HAVE_TLS:
                 continue
             try:
-                s = Server((addr, port), Handler)
                 if tls:
                     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                     ctx.load_cert_chain(CERT, KEY)
-                    s.socket = ctx.wrap_socket(s.socket, server_side=True)
+                    s = TLSServer((addr, port), Handler, ctx)
+                else:
+                    s = Server((addr, port), Handler)
                 threading.Thread(target=s.serve_forever, daemon=True).start()
                 servers.append(s)
                 STATE['listening'].append(f"{'https' if tls else 'http'}://{addr}:{port}")
