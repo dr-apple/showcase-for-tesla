@@ -24,7 +24,7 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.6'
+VERSION = '0.7'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
 import dhcpsniff  # noqa: E402
@@ -206,10 +206,16 @@ def bootpd_plist():
     return None, 'com.apple.bootpd'
 
 
-def port67_free():
+def port67_free(iface=None):
+    """Try the same bind the DHCP server does (interface-scoped), since iOS's
+    bootpd binds that way too and a plain wildcard bind can still succeed."""
     import socket
     u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        u.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        iface = iface or STATE.get('hotspot')
+        if iface:
+            u.setsockopt(socket.IPPROTO_IP, dhcpd.IP_BOUND_IF, socket.if_nametoindex(iface))
         u.bind(('0.0.0.0', 67))
         return True
     except OSError:
@@ -231,6 +237,7 @@ def pause_bootpd():
     attempts = ([('unload', path)] if path else []) + [('bootout', f'system/{label}')]
     for args in attempts:
         out = launchctl(*args)
+        DHCP['bootpd_paused'] = True
         time.sleep(0.5)
         if port67_free():
             DHCP['bootpd_paused'] = True
@@ -239,10 +246,11 @@ def pause_bootpd():
         log(f'DHCP: {args[0]} reichte nicht: {out}')
     subprocess.run(['killall', 'bootpd'], capture_output=True)
     time.sleep(0.5)
+    DHCP['bootpd_paused'] = True          # something was unloaded; resume_bootpd() restores it
     if port67_free():
-        DHCP['bootpd_paused'] = True
+        log('DHCP: iOS-DHCP pausiert (killall)')
         return True
-    resume_bootpd()
+    log('DHCP: Port 67 bleibt belegt')
     return False
 
 
@@ -271,21 +279,39 @@ def start_dhcp(iface):
     if mode == 'off':
         DHCP['state'] = 'aus – iOS vergibt die Adressen'
         return
-    if mode == 'replace' and not port67_free():
-        if not pause_bootpd():
-            DHCP['state'] = 'iOS-DHCP ließ sich nicht pausieren – iOS vergibt die Adressen'
-            log(f'DHCP: {DHCP["state"]}')
-            return
-    srv = dhcpd.DHCPServer(iface, server_ip=HOTSPOT_IP, log=log, taken=arp_table,
-                           gateway_for=needs_gateway)
-    try:
+
+    def try_start():
+        srv = dhcpd.DHCPServer(iface, server_ip=HOTSPOT_IP, log=log, taken=arp_table,
+                               gateway_for=needs_gateway)
         srv.start()
+        return srv
+
+    srv, err = None, None
+    try:
+        srv = try_start()
+    except OSError as e:
+        err = e
+        if mode == 'replace' and e.errno in (48, 98):
+            log('DHCP: Port 67 von iOS belegt')
+            if pause_bootpd():
+                for _ in range(6):
+                    try:
+                        srv = try_start()
+                        break
+                    except OSError as e2:
+                        err = e2
+                        time.sleep(0.5)
+    if srv:
         DHCP['server'] = srv
         DHCP['state'] = 'eigener Server aktiv' + (' (iOS-DHCP pausiert)' if DHCP['bootpd_paused'] else '')
-    except OSError as e:
-        DHCP['state'] = 'iOS vergibt die Adressen (Port 67 belegt)' if e.errno in (48, 98) else f'Fehler: {e}'
-        log(f'DHCP: {DHCP["state"]}')
-        resume_bootpd()
+        return
+    if err is not None and err.errno in (48, 98):
+        DHCP['state'] = ('iOS vergibt die Adressen (Port 67 belegt)' if mode == 'auto'
+                         else 'iOS-DHCP ließ sich nicht pausieren – iOS vergibt die Adressen')
+    else:
+        DHCP['state'] = f'Fehler: {err}'
+    log(f'DHCP: {DHCP["state"]}')
+    resume_bootpd()
 
 
 def stop_dhcp():
