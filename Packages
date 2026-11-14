@@ -1,6 +1,6 @@
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootless, Netzwerktest)
-Version: 0.10~nettest10
+Version: 0.11~nettest11
 Architecture: iphoneos-arm64
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
@@ -17,15 +17,15 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  Übernimmt während CarPlay die Adressvergabe im Hotspot, damit der Tesla
  Router und DNS bekommt (iOS lässt beides ohne Internet weg).
  Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.10~nettest10_iphoneos-arm64.deb
-Size: 16322
-MD5sum: 51b014ec6eea923bcac63c7eb58d3cf8
-SHA1: cc050609f8becd7cc74db36b35fd202c12f8783e
-SHA256: 622ea561d9ad543a4a958988181ff4de8b3e1679ca60aee9bc018d35ac4d577e
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.11~nettest11_iphoneos-arm64.deb
+Size: 16370
+MD5sum: 95dc815e4d610aabb782b97f66659cd6
+SHA1: 7b092f8b0ead960ec6783ab9eaea7e59b25edb27
+SHA256: 1fb6487088ba2c83ee4bfca49d21b13e893ead7b26f701685004dc94f644ef06
 
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootful, Netzwerktest)
-Version: 0.10~nettest10
+Version: 0.11~nettest11
 Architecture: iphoneos-arm
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
@@ -42,8 +42,8 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  Übernimmt während CarPlay die Adressvergabe im Hotspot, damit der Tesla
  Router und DNS bekommt (iOS lässt beides ohne Internet weg).
  Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.10~nettest10_iphoneos-arm.deb
-Size: 16294
-MD5sum: d85e0d22da314509474241f6b5390618
-SHA1: 3f0a0796deec9f8434e9fd24159460840b79501e
-SHA256: f014124473d84735f7b4a7bdaf4fd9e4a0d840b5185cc0d2d06d15bf1ec4d6e7
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.11~nettest11_iphoneos-arm.deb
+Size: 16342
+MD5sum: 93de71c07100b8627474a539b19b66e1
+SHA1: 299a46c0deee1c5f93a0d94c8fead3c2fe24ff53
+SHA256: fa96663f5eecf9991b95c564d807e9fe32cacec55d39b5500528aea32ba8ca8d

@@ -24,7 +24,7 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.10'
+VERSION = '0.11'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir out
 import dhcpd  # noqa: E402
 import dhcpsniff  # noqa: E402
@@ -710,8 +710,11 @@ def main():
             time.sleep(1)
         STATE['alias'] = holder
         start_sniffer(hotspot_iface)
-        start_dns()
         start_dhcp(hotspot_iface)
+        if DHCP['server']:
+            start_dns()          # only the Tesla gets this DNS, and only from our DHCP
+        else:
+            DNS['state'] = 'aus – nur zusammen mit eigenem DHCP-Server'
         servers = start_servers(([ALIAS_IP] if holder else []) + [HOTSPOT_IP])
 
     while True:
