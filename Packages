@@ -1,12 +1,12 @@
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootless, Netzwerktest)
-Version: 0.2~nettest2
+Version: 0.3~nettest3
 Architecture: iphoneos-arm64
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
 Author: dr-apple <dr-apple@users.noreply.github.com>
 Depends: firmware (>= 12.0), python3, openssl, network-cmds
-Installed-Size: 14
+Installed-Size: 18
 Homepage: https://github.com/dr-apple/showcase-for-tesla
 Icon: https://dr-apple.github.io/showcase-for-tesla/CydiaIcon.png
 Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
@@ -14,22 +14,22 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  dieser Dienst dem Hotspot zusätzlich die Adresse 100.96.0.1 und zeigt eine
  Testseite auf http(s)://100.96.0.1 und http(s)://172.20.10.1. Im
  Tesla-Browser öffnen; /log zeigt alle Aufrufe. Ohne Hotspot lauscht nichts.
- Status auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.2~nettest2_iphoneos-arm64.deb
-Size: 7150
-MD5sum: 320b0fded68d0bf53aa774bb19813203
-SHA1: e65cdc551bd158d7f6e0c1df5fe0d7ad9372b776
-SHA256: 994d61ce053b7cf26056b381f59c2262c8c4540151c14ba151f47ef6b4ec9b8a
+ Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.3~nettest3_iphoneos-arm64.deb
+Size: 8480
+MD5sum: 27a4618a584679eddeaef441afb5e0ca
+SHA1: fb2de2bc1084cc9170052e5815e81b110b0bea40
+SHA256: c2aa8dd78aa7ab15a884f6c77f1d62eb971581cddbcd2c30a58a1d424d15603d
 
 Package: com.dr-apple.showcase-for-tesla
 Name: Showcase for Tesla (Rootful, Netzwerktest)
-Version: 0.2~nettest2
+Version: 0.3~nettest3
 Architecture: iphoneos-arm
 Section: Utilities
 Maintainer: dr-apple <dr-apple@users.noreply.github.com>
 Author: dr-apple <dr-apple@users.noreply.github.com>
 Depends: firmware (>= 12.0), python3, openssl, network-cmds
-Installed-Size: 14
+Installed-Size: 18
 Homepage: https://github.com/dr-apple/showcase-for-tesla
 Icon: https://dr-apple.github.io/showcase-for-tesla/CydiaIcon.png
 Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
@@ -37,9 +37,9 @@ Description: Netzwerktest für Showcase for Tesla (CarPlay im Tesla-Browser).
  dieser Dienst dem Hotspot zusätzlich die Adresse 100.96.0.1 und zeigt eine
  Testseite auf http(s)://100.96.0.1 und http(s)://172.20.10.1. Im
  Tesla-Browser öffnen; /log zeigt alle Aufrufe. Ohne Hotspot lauscht nichts.
- Status auf dem iPad selbst (Safari): http://127.0.0.1:8080
-Filename: ./debs/com.dr-apple.showcase-for-tesla_0.2~nettest2_iphoneos-arm.deb
-Size: 7122
-MD5sum: 9037e672feb646e9f461c6e14a9c7e9b
-SHA1: 207c13804189ea75d61a250db9c477c959d51f4c
-SHA256: 9abdddbb2b248c088e7458e3c73127355a494a47ec89adaeb55dc2c8fdbb3518
+ Status und Umschalter auf dem iPad selbst (Safari): http://127.0.0.1:8080
+Filename: ./debs/com.dr-apple.showcase-for-tesla_0.3~nettest3_iphoneos-arm.deb
+Size: 8448
+MD5sum: 0d37bbb981a463c500d85ed3fe304674
+SHA1: f23b35898f7b5a838ce44ca17efdf1c50cc7af62
+SHA256: 2eb3be7da84be5b6ba3851549dee37e7d0b129e612d57dd747c833197d29cf87

@@ -24,7 +24,7 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.2'
+VERSION = '0.3'
 STATUS_PORT = int(os.environ.get('STATUS_PORT', '8080'))
 
 LOG = collections.deque(maxlen=200)
@@ -43,9 +43,33 @@ def tool(*names):
     return None
 
 
+MODE_CHANGED = threading.Event()
 IFCONFIG = tool('/var/jb/usr/sbin/ifconfig', '/var/jb/sbin/ifconfig', '/var/jb/usr/bin/ifconfig',
                 '/usr/sbin/ifconfig', '/sbin/ifconfig')
-STATE = {'hotspot': None, 'alias': False, 'listening': [], 'last_error': ''}
+ARP_PATH = tool('/var/jb/usr/sbin/arp', '/var/jb/usr/bin/arp', '/usr/sbin/arp')
+STATE = {'hotspot': None, 'alias': None, 'listening': [], 'last_error': ''}
+MODES = {'lo0': 'auf lo0 (Standard, lässt den Hotspot unangetastet)',
+         'bridge': 'auf der Hotspot-Schnittstelle',
+         'off': 'aus (nur 172.20.10.1)'}
+MODE_FILE = os.path.join(CERT_DIR, 'mode')
+ARP = ARP_PATH
+
+
+def read_mode():
+    try:
+        m = open(MODE_FILE).read().strip()
+        return m if m in MODES else 'lo0'
+    except OSError:
+        return 'lo0'
+
+
+def write_mode(m):
+    try:
+        with open(MODE_FILE, 'w') as f:
+            f.write(m)
+    except OSError as e:
+        STATE['last_error'] = f'Modus nicht gespeichert: {e}'
+
 
 
 def ipv4_addresses():
@@ -89,17 +113,67 @@ def hotspot_interface():
         return None
     for iface, ips in addrs.items():
         if HOTSPOT_IP in ips:
-            return iface, ALIAS_IP in ips
+            return iface, any(ALIAS_IP in v for v in addrs.values())
     return None
 
 
+def alias_holder():
+    try:
+        for iface, ips in ipv4_addresses().items():
+            if ALIAS_IP in ips:
+                return iface
+    except Exception:
+        pass
+    return None
+
+
+_DHCP_CACHE = [0.0, '']
+
+
+def dhcp_server_state():
+    """Only checked while the hotspot runs (its DHCP server is up by then) and at
+    most every 30 s, so the probe never races the hotspot's own start."""
+    if time.time() - _DHCP_CACHE[0] < 30:
+        return _DHCP_CACHE[1]
+    _DHCP_CACHE[0], _DHCP_CACHE[1] = time.time(), _dhcp_probe()
+    return _DHCP_CACHE[1]
+
+
+def _dhcp_probe():
+    import socket
+    u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        u.bind(('0.0.0.0', 67))
+        return 'KEINER – Port 67 frei, Geräte bekommen keine IP'
+    except PermissionError:
+        return 'unbekannt (keine Rechte)'
+    except OSError as e:
+        return 'läuft (Port 67 belegt)' if e.errno in (48, 98) else f'unbekannt ({e})'
+    finally:
+        u.close()
+
+
+def hotspot_clients():
+    if not ARP:
+        return 'arp fehlt'
+    try:
+        out = subprocess.run([ARP, '-an'], capture_output=True, text=True, timeout=5).stdout
+    except Exception as e:
+        return f'Fehler: {e}'
+    ips = re.findall(r'\((172\.20\.10\.\d+)\) at ([0-9a-f:]+)', out)
+    ips = [f'{ip}' for ip, mac in ips if ip != HOTSPOT_IP and 'incomplete' not in mac]
+    return ', '.join(ips) or 'keine'
+
+
 def set_alias(iface, add):
+    """/32 alias: the Tesla reaches it through its gateway 172.20.10.1, and the
+    hotspot's own subnet (and its DHCP server) stays untouched."""
     if not IFCONFIG:
         STATE['last_error'] = 'ifconfig fehlt (Paket network-cmds), 100.96.0.1 nicht möglich'
         log(STATE['last_error'])
         return False
     args = [IFCONFIG, iface, 'inet', ALIAS_IP]
-    args += ['netmask', '255.255.255.0', 'alias'] if add else ['-alias']
+    args += ['netmask', '255.255.255.255', 'alias'] if add else ['-alias']
     r = subprocess.run(args, capture_output=True, text=True)
     log(f"{'+' if add else '-'} {ALIAS_IP} auf {iface}" + (f" ({r.stderr.strip()})" if r.returncode else ''))
     if r.returncode:
@@ -171,6 +245,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         data = self.rfile.read(int(self.headers.get('Content-Length', 0) or 0))
+        if self.path == '/mode' and self.server.server_address == ('127.0.0.1', STATUS_PORT):
+            m = data.decode(errors='ignore').partition('m=')[2].strip()
+            if m in MODES:
+                write_mode(m)
+                log(f'Modus gewechselt: {m}')
+                MODE_CHANGED.set()
+            self.send_response(303)
+            self.send_header('Location', '/')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         try:
             r = json.loads(data)
             log(f"{self.client_address[0]}  {r.get('url')}  sicher={r.get('secureContext')}  "
@@ -215,7 +300,10 @@ def status_page():
     rows = [
         ('Dienst', f'läuft, Version {VERSION}, Python {sys.version.split()[0]}'),
         ('Hotspot 172.20.10.1', f'erkannt auf {hs}' if hs else 'nicht gefunden – CarPlay in Showcase starten'),
-        ('Adresse 100.96.0.1', 'gesetzt' if STATE['alias'] else 'nicht gesetzt'),
+        ('Adresse 100.96.0.1', f"gesetzt auf {STATE['alias']}" if STATE['alias'] else 'nicht gesetzt'),
+        ('Modus', MODES[read_mode()]),
+        ('DHCP-Server', dhcp_server_state() if hs else '– (Hotspot aus)'),
+        ('Geräte im Hotspot', hotspot_clients() if hs else '–'),
         ('ifconfig', IFCONFIG or 'fehlt – in Sileo „network-cmds“ installieren'),
         ('HTTPS-Zertifikat', 'vorhanden' if HAVE_TLS else 'fehlt'),
         ('Lauscht auf', ', '.join(STATE['listening']) or '–'),
@@ -231,6 +319,10 @@ def status_page():
             '<meta http-equiv="refresh" content="3"><title>Showcase for Tesla – Status</title>'
             '<body style="background:#0d0f12;color:#e8eaed;font:18px/1.5 -apple-system,sans-serif;padding:20px">'
             '<h2>Showcase for Tesla – Netzwerktest</h2><table cellpadding="6">' + body + '</table>'
+            '<p>100.96.0.1 setzen: ' + ''.join(
+                f'<form method="post" action="/mode" style="display:inline">'
+                f'<button name="m" value="{m}" style="font-size:18px;margin:4px;padding:10px 14px">{m}</button></form>'
+                for m in MODES) + '</p>'
             '<p><a style="color:#4c8dff" href="/log">Protokoll</a> · aktualisiert sich alle 3 s</p>')
 
 
@@ -276,32 +368,54 @@ def main():
         while True:
             time.sleep(3600)
     servers, iface = [], None
+
+    def stop_all():
+        nonlocal servers
+        for srv in servers:
+            srv.shutdown()
+            srv.server_close()
+        servers = []
+        STATE['listening'] = []
+        if STATE['alias']:
+            set_alias(STATE['alias'], False)
+        STATE['alias'] = None
+
+    def start_all(hotspot_iface):
+        nonlocal servers
+        STATE['last_error'] = ''
+        mode = read_mode()
+        holder = alias_holder()
+        if holder and (mode == 'off' or holder != ('lo0' if mode == 'lo0' else hotspot_iface)):
+            set_alias(holder, False)          # left over from another mode or version
+            holder = None
+        if mode != 'off' and not holder:
+            target = 'lo0' if mode == 'lo0' else hotspot_iface
+            if set_alias(target, True):
+                holder = target
+            time.sleep(1)
+        STATE['alias'] = holder
+        servers = start_servers(([ALIAS_IP] if holder else []) + [HOTSPOT_IP])
+
     while True:
         found = hotspot_interface()
+        if MODE_CHANGED.is_set():
+            MODE_CHANGED.clear()
+            if servers:
+                stop_all()
         if found and not servers:
-            iface, has_alias = found
+            iface = found[0]
             STATE['hotspot'] = iface
-            log(f'Hotspot erkannt auf {iface}')
-            if not has_alias:
-                has_alias = set_alias(iface, True)
-                time.sleep(1)
-            STATE['alias'] = has_alias
-            servers = start_servers(([ALIAS_IP] if has_alias else []) + [HOTSPOT_IP])
-        elif found and servers and not found[1] and STATE['alias']:
-            log('100.96.0.1 ging verloren, setze neu')
-            STATE['alias'] = set_alias(iface, True)
+            log(f'Hotspot erkannt auf {iface}, Modus {read_mode()}')
+            start_all(iface)
         elif not found and servers:
             log('Hotspot beendet, Server gestoppt')
-            for s in servers:
-                s.shutdown()
-                s.server_close()
-            servers = []
-            STATE['listening'] = []
-            if iface and STATE['alias']:
-                set_alias(iface, False)
-            iface, STATE['hotspot'], STATE['alias'] = None, None, False
-        time.sleep(3)
-
+            stop_all()
+            iface, STATE['hotspot'] = None, None
+        elif not found and not servers:
+            holder = alias_holder()
+            if holder:
+                set_alias(holder, False)
+        MODE_CHANGED.wait(3)
 
 if __name__ == '__main__':
     main()
