@@ -8,11 +8,12 @@ Work in progress: wireless CarPlay in the Tesla browser, built on [Showcase](htt
 https://dr-apple.github.io/showcase-for-tesla
 ```
 
-## Current package: network test (0.1~nettest1)
+## Current package: network test (0.2~nettest2)
 
 Not CarPlay yet. Checks that the Tesla can reach the iPad over the iPad's hotspot.
 
-- Needs Showcase (or Showcase-hud) installed and connected, so the hotspot is up. Depends on `python3` and `openssl`.
+- Needs Showcase (or Showcase-hud) installed and connected, so the hotspot is up. Depends on `python3`, `openssl` and `network-cmds`.
+- Status page on the iPad itself (Safari), always available: `http://127.0.0.1:8080` – shows whether the service runs, the hotspot was found, 100.96.0.1 is set, and the last error.
 - While the hotspot (172.20.10.1) is up, a background service adds `100.96.0.1` to the hotspot interface (the Tesla browser blocks private addresses but allows 100.64.0.0/10) and serves a test page on:
   - `http://100.96.0.1/` and `https://100.96.0.1/`
   - `http://172.20.10.1/` and `https://172.20.10.1/` (self-signed certificate)

@@ -24,7 +24,8 @@ HTTP_PORT = int(os.environ.get('HTTP_PORT', '80'))
 HTTPS_PORT = int(os.environ.get('HTTPS_PORT', '443'))
 CERT_DIR = os.environ.get('CERT_DIR', sys.argv[1] if len(sys.argv) > 1 else '.')
 NO_ALIAS = bool(os.environ.get('NO_ALIAS'))
-VERSION = '0.1'
+VERSION = '0.2'
+STATUS_PORT = int(os.environ.get('STATUS_PORT', '8080'))
 
 LOG = collections.deque(maxlen=200)
 
@@ -39,32 +40,71 @@ def tool(*names):
     for n in names:
         if os.path.exists(n):
             return n
-    return names[-1]
+    return None
 
 
-IFCONFIG = tool('/var/jb/sbin/ifconfig', '/var/jb/usr/sbin/ifconfig', '/sbin/ifconfig')
+IFCONFIG = tool('/var/jb/usr/sbin/ifconfig', '/var/jb/sbin/ifconfig', '/var/jb/usr/bin/ifconfig',
+                '/usr/sbin/ifconfig', '/sbin/ifconfig')
+STATE = {'hotspot': None, 'alias': False, 'listening': [], 'last_error': ''}
+
+
+def ipv4_addresses():
+    """{interface: [IPv4, ...]} via getifaddrs, so no extra tool is needed to see the hotspot."""
+    import ctypes
+    import ctypes.util
+    import socket
+
+    class sockaddr(ctypes.Structure):
+        _fields_ = [('sa_len', ctypes.c_uint8), ('sa_family', ctypes.c_uint8), ('sa_data', ctypes.c_uint8 * 14)]
+
+    class ifaddrs(ctypes.Structure):
+        pass
+    ifaddrs._fields_ = [('ifa_next', ctypes.POINTER(ifaddrs)), ('ifa_name', ctypes.c_char_p),
+                        ('ifa_flags', ctypes.c_uint), ('ifa_addr', ctypes.POINTER(sockaddr)),
+                        ('ifa_netmask', ctypes.c_void_p), ('ifa_dstaddr', ctypes.c_void_p),
+                        ('ifa_data', ctypes.c_void_p)]
+    libc = ctypes.CDLL(ctypes.util.find_library('c') or '/usr/lib/libSystem.B.dylib', use_errno=True)
+    head = ctypes.POINTER(ifaddrs)()
+    if libc.getifaddrs(ctypes.byref(head)) != 0:
+        raise OSError(ctypes.get_errno(), 'getifaddrs')
+    out = {}
+    try:
+        node = head
+        while node:
+            ifa = node.contents
+            if ifa.ifa_addr and ifa.ifa_addr.contents.sa_family == socket.AF_INET:
+                raw = bytes(bytearray(ifa.ifa_addr.contents.sa_data))[2:6]   # skip port
+                out.setdefault(ifa.ifa_name.decode(), []).append(socket.inet_ntoa(raw))
+            node = ifa.ifa_next
+    finally:
+        libc.freeifaddrs(head)
+    return out
 
 
 def hotspot_interface():
     try:
-        out = subprocess.run([IFCONFIG, '-a'], capture_output=True, text=True, timeout=5).stdout
-    except Exception:
+        addrs = ipv4_addresses()
+    except Exception as e:
+        STATE['last_error'] = f'getifaddrs: {e}'
         return None
-    iface = None
-    for line in out.splitlines():
-        m = re.match(r'^([a-z0-9]+):', line)
-        if m:
-            iface = m.group(1)
-        elif f'inet {HOTSPOT_IP} ' in line:
-            return iface, f'inet {ALIAS_IP} ' in out
+    for iface, ips in addrs.items():
+        if HOTSPOT_IP in ips:
+            return iface, ALIAS_IP in ips
     return None
 
 
 def set_alias(iface, add):
+    if not IFCONFIG:
+        STATE['last_error'] = 'ifconfig fehlt (Paket network-cmds), 100.96.0.1 nicht möglich'
+        log(STATE['last_error'])
+        return False
     args = [IFCONFIG, iface, 'inet', ALIAS_IP]
     args += ['netmask', '255.255.255.0', 'alias'] if add else ['-alias']
     r = subprocess.run(args, capture_output=True, text=True)
     log(f"{'+' if add else '-'} {ALIAS_IP} auf {iface}" + (f" ({r.stderr.strip()})" if r.returncode else ''))
+    if r.returncode:
+        STATE['last_error'] = f'ifconfig: {r.stderr.strip()}'
+    return r.returncode == 0
 
 
 PAGE = """<!doctype html><html lang="de"><head><meta charset="utf-8">
@@ -114,6 +154,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.server.server_address[0] == '127.0.0.1' and self.server.server_address[1] == STATUS_PORT \
+                and not self.path.startswith(('/log', '/ws', '/report')):
+            return self.send(200, status_page().encode())
         if self.path == '/ws' and self.headers.get('Upgrade', '').lower() == 'websocket':
             return self.websocket()
         if self.path.startswith('/log'):
@@ -167,6 +210,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             log(f"{self.client_address[0]}  {fmt % args}")
 
 
+def status_page():
+    hs = STATE['hotspot']
+    rows = [
+        ('Dienst', f'läuft, Version {VERSION}, Python {sys.version.split()[0]}'),
+        ('Hotspot 172.20.10.1', f'erkannt auf {hs}' if hs else 'nicht gefunden – CarPlay in Showcase starten'),
+        ('Adresse 100.96.0.1', 'gesetzt' if STATE['alias'] else 'nicht gesetzt'),
+        ('ifconfig', IFCONFIG or 'fehlt – in Sileo „network-cmds“ installieren'),
+        ('HTTPS-Zertifikat', 'vorhanden' if HAVE_TLS else 'fehlt'),
+        ('Lauscht auf', ', '.join(STATE['listening']) or '–'),
+        ('Letzter Fehler', STATE['last_error'] or '–'),
+    ]
+    try:
+        addrs = ipv4_addresses()
+        rows.append(('Netzwerk', ' · '.join(f'{k}: {", ".join(v)}' for k, v in sorted(addrs.items()))))
+    except Exception as e:
+        rows.append(('Netzwerk', f'Fehler: {e}'))
+    body = ''.join(f'<tr><td>{html.escape(k)}</td><td>{html.escape(str(v))}</td></tr>' for k, v in rows)
+    return ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+            '<meta http-equiv="refresh" content="3"><title>Showcase for Tesla – Status</title>'
+            '<body style="background:#0d0f12;color:#e8eaed;font:18px/1.5 -apple-system,sans-serif;padding:20px">'
+            '<h2>Showcase for Tesla – Netzwerktest</h2><table cellpadding="6">' + body + '</table>'
+            '<p><a style="color:#4c8dff" href="/log">Protokoll</a> · aktualisiert sich alle 3 s</p>')
+
+
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -177,10 +244,10 @@ KEY = os.path.join(CERT_DIR, 'key.pem')
 HAVE_TLS = os.path.exists(CERT) and os.path.exists(KEY)
 
 
-def start_servers(addresses):
+def start_servers(addresses, ports=None):
     servers = []
     for addr in addresses:
-        for port, tls in ((HTTP_PORT, False), (HTTPS_PORT, True)):
+        for port, tls in ports or ((HTTP_PORT, False), (HTTPS_PORT, True)):
             if tls and not HAVE_TLS:
                 continue
             try:
@@ -191,14 +258,19 @@ def start_servers(addresses):
                     s.socket = ctx.wrap_socket(s.socket, server_side=True)
                 threading.Thread(target=s.serve_forever, daemon=True).start()
                 servers.append(s)
+                STATE['listening'].append(f"{'https' if tls else 'http'}://{addr}:{port}")
                 log(f"lauscht auf {'https' if tls else 'http'}://{addr}:{port}/")
             except OSError as e:
                 log(f"kann {addr}:{port} nicht öffnen: {e}")
+                STATE['last_error'] = f'{addr}:{port}: {e}'
     return servers
 
 
 def main():
-    log(f'Netzwerktest {VERSION} gestartet, HTTPS {"an" if HAVE_TLS else "aus (kein Zertifikat)"}')
+    log(f'Netzwerktest {VERSION} gestartet, HTTPS {"an" if HAVE_TLS else "aus (kein Zertifikat)"}, '
+        f'ifconfig {IFCONFIG or "fehlt"}')
+    status = start_servers(['127.0.0.1'], [(STATUS_PORT, False)])
+    STATE['listening'] = []
     if NO_ALIAS:
         start_servers(['127.0.0.1'])
         while True:
@@ -208,20 +280,26 @@ def main():
         found = hotspot_interface()
         if found and not servers:
             iface, has_alias = found
+            STATE['hotspot'] = iface
             log(f'Hotspot erkannt auf {iface}')
             if not has_alias:
-                set_alias(iface, True)
+                has_alias = set_alias(iface, True)
                 time.sleep(1)
-            servers = start_servers([ALIAS_IP, HOTSPOT_IP])
+            STATE['alias'] = has_alias
+            servers = start_servers(([ALIAS_IP] if has_alias else []) + [HOTSPOT_IP])
+        elif found and servers and not found[1] and STATE['alias']:
+            log('100.96.0.1 ging verloren, setze neu')
+            STATE['alias'] = set_alias(iface, True)
         elif not found and servers:
             log('Hotspot beendet, Server gestoppt')
             for s in servers:
                 s.shutdown()
                 s.server_close()
             servers = []
-            if iface:
+            STATE['listening'] = []
+            if iface and STATE['alias']:
                 set_alias(iface, False)
-            iface = None
+            iface, STATE['hotspot'], STATE['alias'] = None, None, False
         time.sleep(3)
 
 
